@@ -5,6 +5,7 @@ from nicegui import ui
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 from google.api_core.exceptions import GoogleAPIError
+import pandas as pd
 
 
 config = Config()
@@ -14,12 +15,14 @@ r = RandomWord()
 client = bigquery.Client(project=config.PROJECT_ID)
 
 
-class RLSCreateforUsers:
+class RLSAssignUserstoPolicy:
 
     def __init__(self):
         self.project_id = config.PROJECT_ID
+        # self.policies_list = pd.DataFrame(data= [], columns=['policy_name', 'project_id', 'dataset_id', 'table_name', 'field_id'])
         self.table_list = None
         self.field_list = None
+        self.policy_list = []
 
         self.page_title = "Create Row Level Policy - Users"
         self.headers()
@@ -38,12 +41,13 @@ class RLSCreateforUsers:
         self.selected_type = None  # This is not used.  Consider removing
         self.randon_word = r.word(include_parts_of_speech=["nouns", "adjectives"], word_min_length=3, word_max_length=8)
         self.policy_name = None
+        self.selected_policy = None
 
     # Simplified update functions with early return
-    def _update_selected_dataset(self, e):
+    def _update_selected_policy(self, e):
         if not e.value:
             return  # Early exit if no value
-        self.selected_dataset = e.value
+        self.selected_policy = e.value
         self.step1_next_button.set_visibility(True)  # Simplified visibility
 
     def _update_selected_table(self, e):
@@ -65,18 +69,36 @@ class RLSCreateforUsers:
 
     def headers(self):
         ui.page_title(self.page_title)
-        ui.label('Create Row Level Security to Users').classes('text-primary text-center text-bold') # Subtitle, color, spacing
+        ui.label('Assign Users to Row Level Policy').classes('text-primary text-center text-bold') # Subtitle, color, spacing
         # ui.markdown(f"#{self.page_title}")  # Optional: Keep if you want a larger heading
 
-    def get_datasets(self):
+    def get_policies(self):
+        query_get_policies = f"""
+                SELECT
+                    `policy_name` as `Policy Name`,
+                    `project_id` as `Project ID`,
+                    `dataset_id` as `Dataset ID`,
+                    `table_name` as `Table Name`,
+                    `field_id` as `Field ID`,
+                    FROM
+                    `{config.POLICY_TABLE}` 
+                    WHERE
+                    `policy_type` = 'users';
+            """
         try:
-            datasets = list(client.list_datasets())
-            return [dataset.dataset_id for dataset in datasets]
+            query_job = client.query(query_get_policies)
+            results = list(query_job)
+            
+            policies_list = []
+            for row  in results:
+                policies_list.append(dict(row))
+            
+            return policies_list
+        
         except GoogleAPIError as e:
             ui.notify(f"Error fetching datasets: {e}", type="negative")
             return []  # Return empty list on error
         except Exception as e:
-            ui.notify(f"An unexpected error occurred: {e}", type="negative")
             return []
 
 
@@ -190,8 +212,21 @@ class RLSCreateforUsers:
 
     def step1(self):
         with ui.step(self.step1_title):
-            dataset_list = self.get_datasets()
-            ui.select(dataset_list, label="Select Dataset", on_change=self._update_selected_dataset)
+            self.policy_list = self.get_policies()
+            grid = ui.aggrid({
+                'columnDefs': [
+                    {'field': 'Policy Name', 'checkboxSelection': True, 'filter': 'agTextColumnFilter'},
+                    {'field': 'Project ID', 'filter': 'agTextColumnFilter'},
+                    {'field': 'Dataset ID', 'filter': 'agTextColumnFilter'},
+                    {'field': 'Table Name', 'filter': 'agTextColumnFilter'},
+                    {'field': 'Field ID', 'filter': 'agTextColumnFilter'}
+                ],
+                'rowData': self.policy_list,
+                'rowSelection': 'single',
+            }).classes('max-h-40').classes(add='ag-theme-material')
+            row = grid.get_selected_row()
+            ui.notify(f"{row['name']}, {row['age']}")
+
             with ui.stepper_navigation():
                 self.step1_next_button = ui.button("NEXT", icon="arrow_forward_ios", on_click=self.get_tables_in_dataset)
                 self.step1_next_button.set_visibility(False)

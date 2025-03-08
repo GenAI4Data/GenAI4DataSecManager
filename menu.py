@@ -24,7 +24,7 @@ def menu() -> None:
                     ui.icon('groups', color='blue-500')
                 with ui.item_section():
                     ui.item_label('Create RLS for Groups').classes(replace = 'text-primary text-bold').style('font-size:14px')
-            with ui.item(on_click=lambda: ui.navigate.to('/')):
+            with ui.item(on_click=lambda: ui.navigate.to('/assignuserstopolicy/')):
                 with ui.item_section().props('avatar'):
                     ui.icon('assignment_ind', color='blue-500')
                 with ui.item_section():
@@ -39,3 +39,4 @@ def menu() -> None:
                 ui.icon('gavel', color='blue-500')
             with ui.item_section():
                 ui.item_label('Audit Logs').classes(replace = 'text-primary text-bold').style('font-size:16px')
+                ui.item_label('Coming Soon!').props('caption')

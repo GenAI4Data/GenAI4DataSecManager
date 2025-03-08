@@ -1,17 +1,14 @@
 import theme
-import time
+from wonderwords import RandomWord
+from config import  Config
 from nicegui import ui
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 from google.api_core.exceptions import GoogleAPIError
 
 
-# Use a configuration class or dictionary for better organization
-class Config:
-    PROJECT_ID = 'ce-sap-latam-test-deploy'
-    FILTER_TABLE = 'ce-sap-latam-test-deploy.vanna_managed.policy_filters' #moved filter table
-    
 config = Config()
+r = RandomWord()
 
 # Initialize BigQuery client globally, it's good
 client = bigquery.Client(project=config.PROJECT_ID)
@@ -21,7 +18,6 @@ class RLSCreateforGroups:
 
     def __init__(self):
         self.project_id = config.PROJECT_ID
-        self.assignment_type = ['Group, Users']  # This seems unused, consider removing or using
         self.table_list = None
         self.field_list = None
 
@@ -41,6 +37,8 @@ class RLSCreateforGroups:
         self.selected_table = None
         self.selected_field = None
         self.group_assignment = None
+        self.randon_word = r.word(include_parts_of_speech=["nouns", "adjectives"], word_min_length=3, word_max_length=8)
+        self.policy_name = None
 
     # Simplified update functions with early return
     def _update_selected_dataset(self, e):
@@ -131,9 +129,11 @@ class RLSCreateforGroups:
             return
 
         # Use f-strings for better readability
+        self.policy_name = f'{self.selected_dataset}_{self.selected_table}_{self.selected_field[0]}_{self.randon_word}'
         self.resume.content = f""" 
             ###**The following Row Level Security Policy will be created:**<br>
 
+            **Policy Name**: {self.policy_name}<br>
             **Project ID**: {self.project_id}<br>
             **Dataset ID**: {self.selected_dataset}<br>
             **Table ID**: {self.selected_table}<br>
@@ -146,18 +146,20 @@ class RLSCreateforGroups:
 
         self.code.content = (
             f"CREATE OR REPLACE ROW ACCESS POLICY\n"
-            f"  `{self.selected_dataset}_{self.selected_table}_{self.selected_field[0]}`\n"
+            f"  `{self.policy_name}`\n"
             f"ON\n"
             f"  `{self.project_id}.{self.selected_dataset}.{self.selected_table}`\n"
-            f"GRANT TO (\"allAuthenticatedUsers\")\n"  #Consider making the GRANT TO configurable
+            f"GRANT TO (\"group:{self.group_assignment}\")\n"  #Consider making the GRANT TO configurable
             f"FILTER USING ({self.selected_field[0]} IN\n"
             f"  (SELECT CAST(filter_value AS {self.selected_field[1]})\n"
             f"   FROM `{config.FILTER_TABLE}`\n"  #use config value
-            f"   WHERE project_id = '{self.project_id}'\n"
+            f"   WHERE rls_type = 'group'\n"
+            f"   AND policy_name = '{self.policy_name}'\n"
+            f"   AND project_id = '{self.project_id}'\n"
             f"   AND dataset_id = '{self.selected_dataset}'\n"
             f"   AND table_id = '{self.selected_table}'\n"
             f"   AND field_id = '{self.selected_field[0]}'\n"
-            f"   AND username = SESSION_USER()));"
+            f"   AND rls_group = '{self.group_assignment}'));"
         )
         self.stepper.next()
 
@@ -165,19 +167,27 @@ class RLSCreateforGroups:
         try:
             query_job = client.query(self.code.content)
             query_job.result()  # Wait for the query to complete
-
+        except GoogleAPIError as error:
+            ui.notify(f"Error creating row-level access policy: {error}", type="negative")
+        except Exception as error:
+            ui.notify(f"An unexpected error occurred: {error}", type="negative")
+        try: 
+            query_insert_into_policy_table = f"""
+                INSERT INTO `{config.POLICY_TABLE}` (policy_type, policy_name, project_id, dataset_id, table_name, field_id, group_email)
+                VALUES
+                ('group', '{self.policy_name}', '{self.project_id}', '{self.selected_dataset}', '{self.selected_table}', '{self.selected_field[0]}', '{self.group_assignment}')  
+            """
+            query_job = client.query(query_insert_into_policy_table)
+            query_job.result()
             with ui.dialog() as dialog, ui.card():
                 ui.label(f'Row Level Policy Created on {self.selected_table}.{self.selected_field[0]} successfully!').classes(replace = 'text-positive').classes('font-bold')
                 with ui.row().classes('w-full justify-center'):  # Key change: Row and justification
                     ui.button('Close', on_click=ui.navigate.reload)  # or dialog.close
             dialog.open()
-
-
         except GoogleAPIError as error:
-            ui.notify(f"Error creating row-level access policy: {error}", type="negative")
+            ui.notify(f"Error insert new policy into Policies Table: {error}", type="negative")
         except Exception as error:
             ui.notify(f"An unexpected error occurred: {error}", type="negative")
-
             
 
     def step1(self):
@@ -210,7 +220,7 @@ class RLSCreateforGroups:
 
     def step4(self):
         with ui.step(self.step4_title):
-            self.group_assignment = ui.input(placeholder="Enter the group email", on_change=self._update_group_assignment)
+            self.group_assignment = ui.input(placeholder="Enter the group email", on_change=self._update_group_assignment).props("size=50")
             with ui.stepper_navigation():
                 ui.button("BACK", icon="arrow_back_ios", on_click=self.stepper.previous)
                 self.step4_next_button = ui.button("NEXT", icon="arrow_forward_ios", on_click=self.get_resume)

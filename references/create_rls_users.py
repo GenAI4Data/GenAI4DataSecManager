@@ -1,14 +1,12 @@
 import theme
-from wonderwords import RandomWord
 from config import  Config
 from nicegui import ui
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 from google.api_core.exceptions import GoogleAPIError
 
-
+    
 config = Config()
-r = RandomWord()
 
 # Initialize BigQuery client globally, it's good
 client = bigquery.Client(project=config.PROJECT_ID)
@@ -36,8 +34,6 @@ class RLSCreateforUsers:
         self.selected_table = None
         self.selected_field = None
         self.selected_type = None  # This is not used.  Consider removing
-        self.randon_word = r.word(include_parts_of_speech=["nouns", "adjectives"], word_min_length=3, word_max_length=8)
-        self.policy_name = None
 
     # Simplified update functions with early return
     def _update_selected_dataset(self, e):
@@ -129,11 +125,9 @@ class RLSCreateforUsers:
             return
 
         # Use f-strings for better readability
-        self.policy_name = f'{self.selected_dataset}_{self.selected_table}_{self.selected_field[0]}_{self.randon_word}'
         self.resume.content = f""" 
             ###**The following Row Level Security Policy will be created:**<br>
 
-            **Policy Name**: {self.policy_name}<br>
             **Project ID**: {self.project_id}<br>
             **Dataset ID**: {self.selected_dataset}<br>
             **Table ID**: {self.selected_table}<br>
@@ -145,15 +139,14 @@ class RLSCreateforUsers:
 
         self.code.content = (
             f"CREATE OR REPLACE ROW ACCESS POLICY\n"
-            f"  `{self.policy_name}`\n"
+            f"  `{self.selected_dataset}_{self.selected_table}_{self.selected_field[0]}`\n"
             f"ON\n"
             f"  `{self.project_id}.{self.selected_dataset}.{self.selected_table}`\n"
             f"GRANT TO (\"allAuthenticatedUsers\")\n"  #Consider making the GRANT TO configurable
             f"FILTER USING ({self.selected_field[0]} IN\n"
             f"  (SELECT CAST(filter_value AS {self.selected_field[1]})\n"
             f"   FROM `{config.FILTER_TABLE}`\n"  #use config value
-            f"   WHERE rls_type = 'users'\n"
-            f"   AND project_id = '{self.project_id}'\n"
+            f"   WHERE project_id = '{self.project_id}'\n"
             f"   AND dataset_id = '{self.selected_dataset}'\n"
             f"   AND table_id = '{self.selected_table}'\n"
             f"   AND field_id = '{self.selected_field[0]}'\n"
@@ -165,26 +158,16 @@ class RLSCreateforUsers:
         try:
             query_job = client.query(self.code.content)
             query_job.result()  # Wait for the query to complete
-        except GoogleAPIError as error:
-            ui.notify(f"Error creating row-level access policy: {error}", type="negative")
-        except Exception as error:
-            ui.notify(f"An unexpected error occurred: {error}", type="negative")
 
-        try: 
-            query_insert_into_policy_table = f"""
-                INSERT INTO `{config.POLICY_TABLE}` (policy_type, policy_name, project_id, dataset_id, table_name, field_id)
-                VALUES
-                ('users', '{self.policy_name}', '{self.project_id}', '{self.selected_dataset}', '{self.selected_table}', '{self.selected_field[0]}')  
-            """
-            query_job = client.query(query_insert_into_policy_table)
-            query_job.result()
             with ui.dialog() as dialog, ui.card():
                 ui.label(f'Row Level Policy Created on {self.selected_table}.{self.selected_field[0]} successfully!').classes(replace = 'text-positive').classes('font-bold')
                 with ui.row().classes('w-full justify-center'):  # Key change: Row and justification
                     ui.button('Close', on_click=ui.navigate.reload)  # or dialog.close
             dialog.open()
+
+
         except GoogleAPIError as error:
-            ui.notify(f"Error insert new policy into Policies Table: {error}", type="negative")
+            ui.notify(f"Error creating row-level access policy: {error}", type="negative")
         except Exception as error:
             ui.notify(f"An unexpected error occurred: {error}", type="negative")
 
