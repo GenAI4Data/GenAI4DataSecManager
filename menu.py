@@ -29,7 +29,7 @@ def menu() -> None:
                     ui.icon('assignment_ind', color='blue-500')
                 with ui.item_section():
                     ui.item_label('Assign Users to Policy').classes(replace = 'text-primary text-bold').style('font-size:14px')
-            with ui.item(on_click=lambda: ui.navigate.to('/')):
+            with ui.item(on_click=lambda: ui.navigate.to('/assignvaluestogroup/')):
                 with ui.item_section().props('avatar'):
                     ui.icon('assignment', color='blue-500')
                 with ui.item_section():

@@ -10,19 +10,19 @@ config = Config()
 client = bigquery.Client(project=config.PROJECT_ID)
 
 
-class RLSAssignUserstoPolicy:
+class RLSAssignValuestoGroup:
 
     def __init__(self):
         self.project_id = config.PROJECT_ID
-        self.page_title = "Assign Users to Row Level Policy"
+        self.page_title = "Assign Values to Row Level Policy"
 
         self.selected_policy_name = None
         self.selected_policy_dataset = None
         self.selected_policy_table = None
         self.selected_policy_field = None
+        self.selected_policy_group_email = None
         self.selected_policy = {}
 
-        self.user_list = []
         self.filter_values = []
 
         self.headers()
@@ -30,12 +30,12 @@ class RLSAssignUserstoPolicy:
 
     def headers(self):
         ui.page_title(self.page_title)
-        ui.label('Assign Users to Row Level Policy').classes('text-primary text-center text-bold')
+        ui.label('Assign Values to Row Level Policy').classes('text-primary text-center text-bold')
 
     def stepper_setup(self):
         self.stepper = ui.stepper().props("vertical").classes("w-full")
         self.step1_title = "Select Policy"
-        self.step2_title = "Insert Users and Filters"
+        self.step2_title = "Insert Filter Values"
 
         with self.stepper:
             self.step1()
@@ -48,11 +48,12 @@ class RLSAssignUserstoPolicy:
               `project_id` as `Project ID`,
               `dataset_id` as `Dataset ID`,
               `table_name` as `Table Name`,
-              `field_id` as `Field ID`
+              `field_id` as `Field ID`,
+              `group_email` as `Group Email`
             FROM
               `{config.POLICY_TABLE}` 
             WHERE
-              `policy_type` = 'users';
+              `policy_type` = 'group';
         """
         try:
             query_job = client.query(query_get_policies)
@@ -65,10 +66,7 @@ class RLSAssignUserstoPolicy:
             ui.notify(f"Unexpected error fetching policies: {e}", type="negative")
             return []
 
-    def run_insert_users_and_values(self):
-        if not self.user_list:
-            ui.notify("Please add at least one user email.", type="warning")
-            return
+    def run_insert_values_to_group(self):
 
         if not self.filter_values:
             ui.notify("Please select at least one filter value.", type="warning")
@@ -76,21 +74,20 @@ class RLSAssignUserstoPolicy:
 
         try:
             insert_statements = []
-            for user in self.user_list:
-                for filter_value in self.filter_values:
-                    insert_statements.append(f"""
-                        INSERT INTO `{config.FILTER_TABLE}` 
-                        (rls_type, policy_name, project_id, dataset_id, table_id, field_id, filter_value, username)
-                        VALUES
-                        ('users', '{self.selected_policy_name}', '{self.project_id}', '{self.selected_policy_dataset}', '{self.selected_policy_table}', '{self.selected_policy_field}', '{filter_value}', '{user}')
-                    """)
+            for filter_value in self.filter_values:
+                insert_statements.append(f"""
+                    INSERT INTO `{config.FILTER_TABLE}` 
+                    (rls_type, policy_name, project_id, dataset_id, table_id, field_id, filter_value, rls_group)
+                    VALUES
+                    ('group', '{self.selected_policy_name}', '{self.project_id}', '{self.selected_policy_dataset}', '{self.selected_policy_table}', '{self.selected_policy_field}', '{filter_value}', '{self.selected_policy_group_email}')
+                """)
 
             for insert_statement in insert_statements:
                 query_job = client.query(insert_statement)
                 query_job.result()
 
             with ui.dialog() as dialog, ui.card():
-                ui.label('Users and Filters inserted successfully!').classes('text-positive font-bold')
+                ui.label('Filter Values inserted successfully!').classes('text-positive font-bold')
                 with ui.row().classes('w-full justify-center'):
                     ui.button('Close', on_click=ui.navigate.reload)
             dialog.open()
@@ -107,7 +104,7 @@ class RLSAssignUserstoPolicy:
             self.step1_next_button.set_visibility(False)
             return
 
-        self.selected_policy = [dict(row) for row in rows]
+        self.selected_policy = rows
         self.step1_next_button.set_visibility(True)
 
     def update_policy_values(self):
@@ -115,13 +112,14 @@ class RLSAssignUserstoPolicy:
             ui.notify("No policy selected.", type="warning")
             return
 
-        self.selected_policy_name = self.selected_policy[0]['Policy Name']
-        self.selected_policy_dataset = self.selected_policy[0]['Dataset ID']
-        self.selected_policy_table = self.selected_policy[0]['Table Name']
-        self.selected_policy_field = self.selected_policy[0]['Field ID']
-       
+        selected_policy = self.selected_policy[0]
 
-        # self.fetch_distinct_values()
+        self.selected_policy_name = selected_policy['Policy Name']
+        self.selected_policy_dataset = selected_policy['Dataset ID']
+        self.selected_policy_table = selected_policy['Table Name']
+        self.selected_policy_field = selected_policy['Field ID']
+        self.selected_policy_group_email = selected_policy['Group Email']
+
         self.stepper.next()
 
     def step1(self):
@@ -134,7 +132,9 @@ class RLSAssignUserstoPolicy:
                     {'field': 'Project ID', 'filter': 'agTextColumnFilter'},
                     {'field': 'Dataset ID', 'filter': 'agTextColumnFilter'},
                     {'field': 'Table Name', 'filter': 'agTextColumnFilter'},
-                    {'field': 'Field ID', 'filter': 'agTextColumnFilter'}
+                    {'field': 'Field ID', 'filter': 'agTextColumnFilter'},
+                    {'field': 'Group Email', 'filter': 'agTextColumnFilter'},
+
                 ],
                 'rowData': self.policy_list,
                 'rowSelection': 'single',
@@ -144,19 +144,6 @@ class RLSAssignUserstoPolicy:
                 self.step1_next_button = ui.button("NEXT", icon="arrow_forward_ios",
                                                     on_click=self.update_policy_values)
                 self.step1_next_button.set_visibility(False)
-
-    def add_user(self):
-        email = self.user_input.value.strip()
-        if "@" in email and "." in email:
-            if email not in self.user_list:
-                self.user_list.append(email)
-                self.grid_1.options['rowData'] = [{"User email": u} for u in self.user_list]
-                self.grid_1.update()
-                self.user_input.value = ''
-            else:
-                ui.notify("User already added.", type="warning")
-        else:
-            ui.notify("Invalid email address.", type="warning")
 
     def add_filter(self):
         filter_value = self.filter_input.value.strip()
@@ -179,37 +166,21 @@ class RLSAssignUserstoPolicy:
 
     def step2(self):
         with ui.step(self.step2_title):
-            with ui.row().classes('w-full justify-center'):
-                with ui.grid(columns=2).classes('gap-8 w-full justify-center'):
-                    with ui.column().classes('items-left text-left'):
-                        ui.label("Add User Emails:")
-                        self.user_input = ui.input(placeholder="user@example.com").classes('w-full')
-                        ui.button("Add User", on_click=self.add_user)
-
-                        self.grid_1 = ui.aggrid({
-                            'columnDefs': [
-                                {'field': 'User email', 'filter': 'agTextColumnFilter'},
-                            ],
-                            'rowData': [],
-                            'rowSelection': 'multiple',
-                        }).classes('max-h-160 ag-theme-quartz')
-
-                    with ui.column().classes('items-left text-left'):
-                        ui.label("Add Filter Values:")
-                        self.filter_input = ui.input().classes('w-full')
-                        ui.button("Add Filter", on_click=self.add_filter)
-                        self.grid_2 = ui.aggrid({
-                            'columnDefs': [
-                                {'field': 'Filter Values', 'checkboxSelection': True, 'filter': 'agTextColumnFilter'},
-                            ],
-                            'rowData': [],
-                            'rowSelection': 'multiple',
-                        }).classes('max-h-160 ag-theme-quartz').on('rowSelected', self.get_selected_filters)
+            ui.label(f"Add Filter Values for Group: {self.selected_policy_group_email}")
+            self.filter_input = ui.input(label="Filter Value").classes('w-full')
+            ui.button(f"Add Filter", on_click=self.add_filter)
+            self.grid_2 = ui.aggrid({
+                'columnDefs': [
+                    {'field': 'Filter Values', 'filter': 'agTextColumnFilter'},
+                ],
+                'rowData': [],
+                'rowSelection': 'multiple', # Enable multiple row selection
+            }).classes('max-h-160 ag-theme-quartz').on('rowSelected', self.get_selected_filters)
 
             with ui.stepper_navigation():
                 ui.button("BACK", icon="arrow_back_ios", on_click=self.stepper.previous)
-                ui.button("Insert", icon="enhanced_encryption", on_click=self.run_insert_users_and_values)
+                ui.button("Insert", icon="enhanced_encryption", on_click=self.run_insert_values_to_group)
 
     def run(self):
-        with theme.frame('Assign Users to Policy'):
-            pass  # The stepper is already created in the constructor
+        with theme.frame('Assign Values to Policy'):
+            pass
