@@ -223,9 +223,9 @@ class RLSAssignUserstoPolicy:
                 ],
                 'rowData': self.policy_list,
                 'rowSelection': 'single',
-            }).classes('max-h-40').classes(add='ag-theme-material')
+            }).classes('max-h-160').classes(add='ag-theme-material')
             row = grid.get_selected_row()
-            ui.notify(f"{row['name']}, {row['age']}")
+            # ui.notify(f"{row['name']}, {row['age']}")
 
             with ui.stepper_navigation():
                 self.step1_next_button = ui.button("NEXT", icon="arrow_forward_ios", on_click=self.get_tables_in_dataset)
